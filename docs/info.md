@@ -26,6 +26,13 @@ The register file is 68 flip-flops. Writes are captured on the rising edge of
 `clk` while `WE` is high; reads are combinational, so the result is valid as
 soon as the last write has settled.
 
+Address 9 is an **accumulate** command rather than a register: writing to it
+feeds the ALU result back into `a`. That turns the chip into an accumulator —
+load `a` and the opcode once, then stream new `b` values and take a running
+total at one clock per operation instead of reloading all nine bytes each time.
+It also creates the design's only register-to-register path, `a → ALU → a`,
+which is what the static timing analysis has to close.
+
 ### Write address map
 
 Little-endian: address 0 is the least significant byte.
@@ -36,7 +43,8 @@ Little-endian: address 0 is the least significant byte.
 | 1       | `a[15:8]`       | 6       | `b[23:16]`      |
 | 2       | `a[23:16]`      | 7       | `b[31:24]`      |
 | 3       | `a[31:24]`      | 8       | `alu_op[3:0]` (low nibble of the data byte) |
-| 4       | `b[7:0]`        | 9–15    | no effect       |
+| 4       | `b[7:0]`        | 9       | **accumulate**: `a <= result` (data byte ignored) |
+|         |                 | 10–15   | no effect       |
 
 ### Result byte select (`RSEL1:RSEL0`, `uio[6:5]`)
 
@@ -98,7 +106,8 @@ not sign-extending.
 
 The cocotb testbench in `test/` runs directed corner vectors, 120 constrained
 random vectors across every opcode, partial-write isolation, write-enable
-gating and reset behaviour.
+gating, accumulate and running-total sequences, and reset behaviour. The same
+suite is re-run against the hardened gate-level netlist.
 
 ## External hardware
 

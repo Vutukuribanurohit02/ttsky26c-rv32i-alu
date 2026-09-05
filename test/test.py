@@ -31,6 +31,7 @@ MASK = 0xFFFFFFFF
 ADDR_A = 0   # 0..3
 ADDR_B = 4   # 4..7
 ADDR_OP = 8
+ADDR_ACC = 9   # write here to latch the ALU result back into A
 
 
 def to_signed(x):
@@ -101,6 +102,11 @@ async def apply(dut, op, a, b):
     await write_word(dut, ADDR_B, b)
     await write_byte(dut, ADDR_OP, op)
     return await read_result(dut)
+
+
+async def accumulate(dut):
+    """Latch the current ALU result back into A (one clock)."""
+    await write_byte(dut, ADDR_ACC, 0x00)   # data byte is ignored
 
 
 async def reset(dut):
@@ -254,3 +260,72 @@ async def test_reset_clears(dut):
     result, zero = await read_result(dut)
     assert result == 0, f"result after reset is {result:#010x}"
     assert zero == 1
+
+
+@cocotb.test()
+async def test_accumulate(dut):
+    """Address 9 latches the ALU result back into A."""
+    cocotb.start_soon(Clock(dut.clk, 100, units="ns").start())
+    await reset(dut)
+
+    # 5 + 3 = 8, then accumulate so A becomes 8
+    await apply(dut, OP_ADD, 5, 3)
+    await accumulate(dut)
+    result, _ = await read_result(dut)
+    assert result == 11, f"after accumulate expected 8+3=11, got {result:#010x}"
+
+    # accumulate again: 11 + 3 = 14
+    await accumulate(dut)
+    result, _ = await read_result(dut)
+    assert result == 14, f"second accumulate expected 14, got {result:#010x}"
+
+    # B and the opcode must be untouched by an accumulate
+    await write_word(dut, ADDR_B, 0)
+    result, zero = await read_result(dut)
+    assert result == 11, f"accumulate corrupted A: {result:#010x}"
+    assert zero == 0
+
+
+@cocotb.test()
+async def test_accumulate_running_total(dut):
+    """Load A and the opcode once, then stream B values to sum them."""
+    cocotb.start_soon(Clock(dut.clk, 100, units="ns").start())
+    await reset(dut)
+
+    values = [7, 100, 65535, 0x0100_0000, 3]
+    await write_word(dut, ADDR_A, 0)
+    await write_byte(dut, ADDR_OP, OP_ADD)
+
+    total = 0
+    for v in values:
+        await write_word(dut, ADDR_B, v)
+        await accumulate(dut)
+        total = (total + v) & MASK
+        # after accumulating, A holds the running total and result = A + B
+        result, _ = await read_result(dut)
+        assert result == ((total + v) & MASK), (
+            f"running total wrong after adding {v:#x}: "
+            f"A should be {total:#010x}, result reads {result:#010x}"
+        )
+
+    # final check: set B to 0 so result == A == the true sum
+    await write_word(dut, ADDR_B, 0)
+    result, _ = await read_result(dut)
+    assert result == sum(values) & MASK, (
+        f"final total {result:#010x}, expected {sum(values) & MASK:#010x}"
+    )
+
+
+@cocotb.test()
+async def test_accumulate_needs_write_enable(dut):
+    """Address 9 with WE low must not accumulate."""
+    cocotb.start_soon(Clock(dut.clk, 100, units="ns").start())
+    await reset(dut)
+
+    await apply(dut, OP_ADD, 5, 3)
+    dut.uio_in.value = ADDR_ACC          # bit 4 clear
+    await ClockCycles(dut.clk, 3)
+    dut.uio_in.value = 0
+
+    result, _ = await read_result(dut)
+    assert result == 8, f"accumulated without WE: {result:#010x}"

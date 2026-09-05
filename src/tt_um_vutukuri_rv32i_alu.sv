@@ -24,8 +24,8 @@
  *   ui_in[7:0]     in    write data byte
  *
  *   uio_in[3:0]    in    write address (see table below)
- *   uio_in[4]      in    write enable - byte is captured on the rising clk
- *                        edge while this is HIGH
+ *   uio_in[4]      in    write enable - the addressed action happens on the
+ *                        rising clk edge while this is HIGH
  *   uio_in[6:5]    in    result byte select
  *   uio_in[7]      -     unused (this pin is driven as an output)
  *
@@ -39,8 +39,8 @@
  * Write address map  (little-endian: address 0 is the least significant byte)
  * ---------------------------------------------------------------------------
  *   0  a[7:0]      4  b[7:0]      8  {4'bx, alu_op[3:0]}  (upper nibble ignored)
- *   1  a[15:8]     5  b[15:8]     9..15  no effect
- *   2  a[23:16]    6  b[23:16]
+ *   1  a[15:8]     5  b[15:8]     9  ACCUMULATE: a <= result   (ui_in ignored)
+ *   2  a[23:16]    6  b[23:16]   10..15  no effect
  *   3  a[31:24]    7  b[31:24]
  *
  * ---------------------------------------------------------------------------
@@ -60,6 +60,11 @@
  *      have settled - no extra clock is required between the last write and
  *      the first read.
  *   4. Read the zero flag on uio_out[7] at any time.
+ *
+ *   Accumulate mode: writing to address 9 latches the current ALU result back
+ *   into a.  This turns the chip into an accumulator - load a and b once, then
+ *   feed a stream of new b values and opcodes to evaluate a running total
+ *   without ever reloading a.  One clock per operation instead of five.
  */
 
 `default_nettype none
@@ -81,6 +86,13 @@ module tt_um_vutukuri_rv32i_alu (
   wire [3:0] wr_addr = uio_in[3:0];
   wire       wr_en   = uio_in[4];
   wire [1:0] res_sel = uio_in[6:5];
+
+  // --------------------------------------------------------------------
+  // ALU outputs - declared here so the register block can use alu_result
+  // for the accumulate path
+  // --------------------------------------------------------------------
+  wire [31:0] alu_result;
+  wire        alu_zero;
 
   // --------------------------------------------------------------------
   // operand registers - 32 + 32 + 4 = 68 flip-flops
@@ -105,7 +117,8 @@ module tt_um_vutukuri_rv32i_alu (
         4'd6:    b_reg[23:16]  <= ui_in;
         4'd7:    b_reg[31:24]  <= ui_in;
         4'd8:    op_reg        <= ui_in[3:0];
-        default: /* addresses 9..15 are no-ops */ ;
+        4'd9:    a_reg         <= alu_result;  // accumulate
+        default: /* addresses 10..15 are no-ops */ ;
       endcase
     end
   end
@@ -113,9 +126,6 @@ module tt_um_vutukuri_rv32i_alu (
   // --------------------------------------------------------------------
   // the DUT - unmodified, purely combinational
   // --------------------------------------------------------------------
-  wire [31:0] alu_result;
-  wire        alu_zero;
-
   alu u_alu (
       .a      (a_reg),
       .b      (b_reg),
