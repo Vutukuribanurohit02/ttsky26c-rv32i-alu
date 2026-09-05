@@ -85,12 +85,18 @@ The final +0.425 ns is thin, about 1.7% margin, which puts the real critical pat
 
 `test/test.py`, cocotb, ten tests:
 
-- 14 directed vectors covering all ten opcodes, including sign-boundary and shift-amount edge cases
-- 120 constrained-random vectors checked against a Python golden model
-- Partial-write isolation — writing one operand byte must leave the other eight untouched
-- Write-enable gating — data on `ui_in` must be ignored when `uio_in[4]` is low
-- Accumulate sequences
-- Reset behaviour
+| Test | Covers |
+|---|---|
+| `test_pin_directions` | `uio_oe` drives only bit 7 |
+| `test_reset_state` | Registers clear on `rst_n` |
+| `test_directed` | 14 hand-picked vectors — zero-flag wrap, borrow, sign-extending SRA, shift-amount truncation to `b[4:0]`, and the SLT/SLTU pair that differs only in signedness |
+| `test_random` | 120 constrained-random vectors across all ten opcodes, seeded, checked against a Python golden model |
+| `test_partial_write` | Writing one operand byte leaves the other eight untouched |
+| `test_no_write_when_we_low` | Data on `ui_in` ignored when `uio_in[4]` is low |
+| `test_reset_clears` | Reset mid-sequence returns to a known state |
+| `test_accumulate` | Address 9 loads `a <= result` |
+| `test_accumulate_running_total` | Repeated accumulate produces a correct running sum |
+| `test_accumulate_needs_write_enable` | Address 9 is gated by write enable like any other write |
 
 All ten pass at RTL under Icarus, and again against the post-route gate-level netlist in the `gds` workflow. Simulating the netlist is the part that matters — it is the only check that what was routed still does what the RTL did.
 
